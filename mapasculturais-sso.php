@@ -23,9 +23,9 @@ class MapasCulturais_SSO {
 
     public function __construct() {
         // Cargar ajustes desde la base de datos de WordPress
-        $this->mapas_url_client = get_option('mc_sso_client_url', 'https://culturaenlinea.uy');
-        $this->mapas_url_server = get_option('mc_sso_server_url', 'https://culturaenlinea.uy');
-        $this->required_seal_id = get_option('mc_sso_seal_id', 5);
+        $this->mapas_url_client = get_option('mc_sso_client_url', 'http://localhost:8081');
+        $this->mapas_url_server = get_option('mc_sso_server_url', 'http://mapas:80');
+        $this->required_seal_id = get_option('mc_sso_seal_id', 2);
         
         // Obtener el secreto compartido de DB, entorno o constante WP
         $db_secret = get_option('mc_sso_shared_secret', '');
@@ -36,6 +36,12 @@ class MapasCulturais_SSO {
         
         // Interceptar el retorno desde Mapas Culturais
         add_action('init', array($this, 'handle_mapas_callback'));
+
+        // Single Log-Out (SLO): Si sale del foro, que salga del Mapa también y no se autologuee
+        add_action('wp_logout', array($this, 'redirect_after_logout'));
+
+        // Mostrar página de rechazo personalizada (en vez del login gris)
+        add_action('template_redirect', array($this, 'render_sso_denied_page'));
 
         // Registrar panel de administración
         add_action('admin_menu', array($this, 'add_plugin_page'));
@@ -98,6 +104,16 @@ class MapasCulturais_SSO {
     }
 
     /**
+     * Paso 0: Single Log-Out (SLO) a nivel de servidor IDP (Mapas)
+     */
+    public function redirect_after_logout() {
+        // Redirigir al endpoint nativo de cierre de sesión de Mapas Culturais (en portugués)
+        $logout_url = $this->mapas_url_client . '/sair';
+        wp_redirect($logout_url);
+        exit;
+    }
+
+    /**
      * Paso 1: Usuario intenta entrar a wp-login.php, lo mandamos a Mapas Culturais
      */
     public function redirect_to_mapas_login() {
@@ -134,12 +150,70 @@ class MapasCulturais_SSO {
         set_transient('mapas_sso_state_' . $state, 'valid', 5 * MINUTE_IN_SECONDS);
 
         // Armar URL del IdP (Mapas)
-        $auth_url = $this->mapas_url . '/wp-sso/login' . 
+        $auth_url = $this->mapas_url_client . '/wp-sso/login' . 
                     '?redirect_to=' . urlencode(wp_login_url()) . 
                     '&state=' . urlencode($state);
 
         wp_redirect($auth_url);
         exit;
+    }
+
+    /**
+     * Página visual de aterrizaje para rechazos (independiente del login)
+     */
+    public function render_sso_denied_page() {
+        if (isset($_GET['sso_denied'])) {
+            $reason = sanitize_text_field($_GET['sso_denied']);
+            
+            $blog_url = home_url();
+            $mapas_url = $this->mapas_url_client;
+            
+            $title = 'Acceso Restringido';
+            $message = '';
+            
+            if ($reason == 'seal') {
+                $message = '<p>Lo sentimos, el acceso a este foro de debate es <strong>exclusivo para integrantes verificados</strong>.</p>
+                            <p>Hemos verificado tu identidad, pero tu perfil actual no posee el Sello requerido (<b>Puntos de Cultura</b>). Para participar, comunícate con la administración para solicitar que configuren este sello en tu perfil de agente.</p>';
+            } else if ($reason == 'api') {
+                $message = '<p>Se produjo un error de seguridad o conexión con Cultura en Línea durante la validación de tu identidad. Inténtalo más tarde.</p>';
+            } else {
+                $message = '<p>Sesión caducada o inválida. Seguridad de token comprometida.</p>';
+            }
+            
+            echo '<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso Restringido - Foro Cultural</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1f2937; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background: white; padding: 48px 40px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); max-width: 540px; text-align: center; border-top: 6px solid #ef4444; }
+        .icon { font-size: 64px; display: block; margin-bottom: 20px; text-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; color: #111827; font-size: 26px; font-weight: 800; letter-spacing: -0.025em; }
+        p { line-height: 1.6; color: #4b5563; font-size: 16px; margin-bottom: 20px; }
+        .buttons { display: flex; gap: 15px; justify-content: center; margin-top: 36px; flex-wrap: wrap; }
+        .btn { padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: #4f46e5; color: white; border: 1px solid #4f46e5; box-shadow: 0 4px 6px rgba(79, 70, 229, 0.2); }
+        .btn-primary:hover { background: #4338ca; border-color: #4338ca; transform: translateY(-1px); }
+        .btn-outline { background: white; color: #4b5563; border: 1px solid #d1d5db; }
+        .btn-outline:hover { background: #f3f4f6; color: #111827; transform: translateY(-1px); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span class="icon">✋</span>
+        <h1>' . $title . '</h1>
+        ' . $message . '
+        <div class="buttons">
+            <a href="' . $mapas_url . '" class="btn btn-primary">⬅ Ir a Cultura en Línea</a>
+            <a href="' . $blog_url . '" class="btn btn-outline">Volver al Foro</a>
+        </div>
+    </div>
+</body>
+</html>';
+            exit;
+        }
     }
 
     /**
@@ -155,12 +229,13 @@ class MapasCulturais_SSO {
 
         // 1. Verificar State (CSRF)
         if (get_transient('mapas_sso_state_' . $state) !== 'valid') {
-            wp_die('Error de Seguridad: Sesión de inicio de sesión caducada o inválida.', 'SSO Error', array('response' => 403));
+            wp_redirect(home_url('/?sso_denied=session'));
+            exit;
         }
         delete_transient('mapas_sso_state_' . $state);
 
         // 2. Consulta Server-to-Server a Mapas Culturais
-        $verify_endpoint = $this->mapas_url . '/wp-sso/verify';
+        $verify_endpoint = $this->mapas_url_server . '/wp-sso/verify';
         $response = wp_remote_post($verify_endpoint, array(
             'body' => array(
                 'token' => $token,
@@ -170,14 +245,16 @@ class MapasCulturais_SSO {
         ));
 
         if (is_wp_error($response)) {
-            wp_die('Error conectando con Cultura en Línea: ' . $response->get_error_message());
+            wp_redirect(home_url('/?sso_denied=api'));
+            exit;
         }
 
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
 
         if (!$data || (isset($data['error']) && $data['error'] == true)) {
-            wp_die('Acceso Denegado por Mapas Culturais. Mensaje: ' . ($data['message'] ?? 'Desconocido'));
+            wp_redirect(home_url('/?sso_denied=api'));
+            exit;
         }
 
         // 3. LA REGLA DEL SELLO (El "Filtro")
@@ -190,11 +267,8 @@ class MapasCulturais_SSO {
         }
 
         if (!$tiene_sello) {
-            wp_die(
-                '<h1>Acceso Restringido</h1><p>Lo sentimos, el acceso a este foro es exclusivo para integrantes de la red <b>Puntos de Cultura</b>.</p><p><a href="' . home_url() . '">Volver al inicio</a></p>', 
-                'Acceso Denegado', 
-                array('response' => 403)
-            );
+            wp_redirect(home_url('/?sso_denied=seal'));
+            exit;
         }
 
         // 4. Iniciar Sesión en WordPress
@@ -208,7 +282,13 @@ class MapasCulturais_SSO {
         $email = sanitize_email($mapas_data['user']['email']);
         $username = 'mc_' . intval($mapas_data['user']['id']);
         
-        $user = get_user_by('email', $email);
+        // Primero buscar por ID de mapa (login local de WP)
+        $user = get_user_by('login', $username);
+
+        // Si no existe, intentar por correo por seguridad
+        if (!$user) {
+            $user = get_user_by('email', $email);
+        }
 
         if (!$user) {
             // Si el usuario no existe en WP, lo creamos
@@ -216,7 +296,8 @@ class MapasCulturais_SSO {
             $user_id = wp_create_user($username, $random_password, $email);
             
             if (is_wp_error($user_id)) {
-                wp_die('Error creando cuenta local en el foro.');
+                $error_msg = $user_id->get_error_message();
+                wp_die('Error fatal creando cuenta local en el foro (Usuario: ' . esc_html($username) . ' | Email: ' . esc_html($email) . '). Mensaje técnico: ' . esc_html($error_msg));
             }
 
             // Actualizar nombre visible
