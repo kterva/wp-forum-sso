@@ -33,6 +33,9 @@ class MapasCulturais_SSO {
 
         // Redirigir la página de login de WP a Mapas Culturais
         add_action('login_init', array($this, 'redirect_to_mapas_login'));
+
+        // Redirigir páginas de login del frontend (ej. wpForo)
+        add_action('template_redirect', array($this, 'intercept_frontend_login'), 5);
         
         // Interceptar el retorno desde Mapas Culturais
         add_action('init', array($this, 'handle_mapas_callback'));
@@ -49,7 +52,16 @@ class MapasCulturais_SSO {
     }
 
     public function add_plugin_page() {
-        add_options_page('Configuración SSO Mapas Culturais', 'Mapas SSO', 'manage_options', 'mapas-sso-setting-admin', array($this, 'create_admin_page'));
+        // Se añade como menú principal en el panel izquierdo
+        add_menu_page(
+            'Configuración SSO Mapas Culturais', 
+            'Mapas SSO', 
+            'manage_options', 
+            'mapas-sso-setting-admin', 
+            array($this, 'create_admin_page'),
+            'dashicons-admin-network', // Ícono de red/conexión
+            80 // Posición en el menú izquierdo
+        );
     }
 
     public function create_admin_page() {
@@ -105,6 +117,33 @@ class MapasCulturais_SSO {
 
     /**
      * Paso 0: Single Log-Out (SLO) a nivel de servidor IDP (Mapas)
+     */
+    public function intercept_frontend_login() {
+        // Puerta trasera para administradores locales de WP: wp-login.php?native=1
+        if ( isset($_GET['native']) && $_GET['native'] == '1' ) {
+            return;
+        }
+
+        $is_wpforo_login = false;
+        
+        // Comprobar por slug de página en WordPress
+        if ( is_page('sign-in') || is_page('sign-up') || is_page('login') || is_page('register') ) {
+            $is_wpforo_login = true;
+        }
+
+        // Comprobar si la URL contiene "sign-in" o "sign-up" (muy útil para wpForo)
+        $uri = $_SERVER['REQUEST_URI'] ?? '';
+        if ( strpos($uri, '/sign-in') !== false || strpos($uri, '/sign-up') !== false ) {
+            $is_wpforo_login = true;
+        }
+
+        if ( $is_wpforo_login ) {
+            $this->redirect_to_mapas_login();
+        }
+    }
+
+    /**
+     * Paso 0.5: Single Log-Out (SLO) a nivel de servidor IDP (Mapas)
      */
     public function redirect_after_logout() {
         // Redirigir al endpoint nativo de cierre de sesión de Mapas Culturais (en portugués)
