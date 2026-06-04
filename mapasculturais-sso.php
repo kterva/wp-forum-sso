@@ -49,6 +49,9 @@ class MapasCulturais_SSO {
         // Registrar panel de administración
         add_action('admin_menu', array($this, 'add_plugin_page'));
         add_action('admin_init', array($this, 'page_init'));
+
+        // Registrar AJAX para prueba de conexión
+        add_action('wp_ajax_mc_sso_test_connection', array($this, 'ajax_test_connection'));
     }
 
     public function add_plugin_page() {
@@ -77,8 +80,79 @@ class MapasCulturais_SSO {
                 submit_button();
             ?>
             </form>
+
+            <hr style="margin: 30px 0;">
+            <h2>Prueba de Conexión</h2>
+            <p>Haz clic en el botón para verificar si WordPress puede comunicarse con Mapas Culturais y si el Secreto Compartido es correcto.</p>
+            <p><strong>Nota:</strong> Guarda los cambios antes de probar.</p>
+            <button type="button" id="btn-test-connection" class="button button-secondary">Probar Conexión</button>
+            <span id="test-connection-result" style="margin-left: 10px; font-weight: bold;"></span>
+
+            <script>
+            jQuery(document).ready(function($) {
+                $('#btn-test-connection').on('click', function() {
+                    var $btn = $(this);
+                    var $result = $('#test-connection-result');
+                    $btn.prop('disabled', true).text('Probando...');
+                    $result.text('').css('color', 'black');
+                    
+                    $.post(ajaxurl, { action: 'mc_sso_test_connection' }, function(response) {
+                        $btn.prop('disabled', false).text('Probar Conexión');
+                        if (response.success) {
+                            $result.text('✅ ' + response.data).css('color', 'green');
+                        } else {
+                            $result.text('❌ ' + response.data).css('color', 'red');
+                        }
+                    }).fail(function() {
+                        $btn.prop('disabled', false).text('Probar Conexión');
+                        $result.text('❌ Error de red al intentar probar.').css('color', 'red');
+                    });
+                });
+            });
+            </script>
         </div>
         <?php
+    }
+
+    public function ajax_test_connection() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('No tienes permisos.');
+        }
+
+        $server_url = get_option('mc_sso_server_url', '');
+        $secret = get_option('mc_sso_shared_secret', '');
+        
+        if (empty($server_url)) {
+            wp_send_json_error('La URL del servidor está vacía.');
+        }
+
+        $verify_endpoint = rtrim($server_url, '/') . '/wp-sso/verify';
+        
+        $response = wp_remote_post($verify_endpoint, array(
+            'body' => array(
+                'token' => 'TEST_CONNECTION_PING',
+                'secret' => $secret
+            ),
+            'timeout' => 10
+        ));
+
+        if (is_wp_error($response)) {
+            wp_send_json_error('Error de conexión: ' . $response->get_error_message());
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if ($status_code == 403 || (isset($data['message']) && $data['message'] == 'Invalid Shared Secret')) {
+            wp_send_json_error('Conexión exitosa al servidor, pero el Secreto Compartido es INCORRECTO.');
+        }
+
+        if ($status_code == 400 || $status_code == 401 || (isset($data['message']) && strpos(strtolower($data['message']), 'token') !== false)) {
+            wp_send_json_success('¡Conexión perfecta! El servidor responde y el secreto es correcto.');
+        }
+
+        wp_send_json_error('Respuesta inesperada del servidor (HTTP ' . $status_code . '). Verifica que la URL del servidor sea correcta.');
     }
 
     public function page_init() {
