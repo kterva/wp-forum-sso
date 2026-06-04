@@ -68,6 +68,7 @@ class MapasCulturais_SSO {
         ?>
         <div class="wrap">
             <h1>Configuración de Mapas Culturais SSO</h1>
+            <?php settings_errors(); ?>
             <p>Ajuste las URLs del proveedor de identidad (Mapas Culturais) y el sello requerido.</p>
             <form method="post" action="options.php">
             <?php
