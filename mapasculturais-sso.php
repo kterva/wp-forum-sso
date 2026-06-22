@@ -156,6 +156,7 @@ class MapasCulturais_SSO {
     }
 
     public function page_init() {
+        register_setting('mc_sso_option_group', 'mc_sso_enabled');
         register_setting('mc_sso_option_group', 'mc_sso_client_url');
         register_setting('mc_sso_option_group', 'mc_sso_server_url');
         register_setting('mc_sso_option_group', 'mc_sso_seal_id');
@@ -163,10 +164,18 @@ class MapasCulturais_SSO {
 
         add_settings_section('mc_sso_setting_section', 'Ajustes de Conexión y Filtro', null, 'mapas-sso-setting-admin');
 
+        add_settings_field('mc_sso_enabled', 'Activar SSO', array($this, 'enabled_callback'), 'mapas-sso-setting-admin', 'mc_sso_setting_section');
         add_settings_field('mc_sso_client_url', 'URL Pública de Mapas Culturais', array($this, 'client_url_callback'), 'mapas-sso-setting-admin', 'mc_sso_setting_section');
         add_settings_field('mc_sso_server_url', 'URL Interna para Auth API', array($this, 'server_url_callback'), 'mapas-sso-setting-admin', 'mc_sso_setting_section');
         add_settings_field('mc_sso_seal_id', 'ID del Sello Requerido', array($this, 'seal_id_callback'), 'mapas-sso-setting-admin', 'mc_sso_setting_section');
         add_settings_field('mc_sso_shared_secret', 'Secreto Compartido', array($this, 'shared_secret_callback'), 'mapas-sso-setting-admin', 'mc_sso_setting_section');
+    }
+
+    public function enabled_callback() {
+        $enabled = get_option('mc_sso_enabled', '0');
+        printf('<input type="checkbox" id="mc_sso_enabled" name="mc_sso_enabled" value="1" %s />', checked('1', $enabled, false));
+        echo '<label for="mc_sso_enabled"> <strong>Habilitar redirección SSO</strong> en este sitio específico.</label>';
+        echo '<p class="description">Si no está marcado, el login nativo de WordPress funcionará normalmente (útil para subsitios donde no quieres SSO).</p>';
     }
 
     public function client_url_callback() {
@@ -194,6 +203,11 @@ class MapasCulturais_SSO {
      * Paso 0: Single Log-Out (SLO) a nivel de servidor IDP (Mapas)
      */
     public function intercept_frontend_login() {
+        // Verificar si el SSO está habilitado para este sitio
+        if (get_option('mc_sso_enabled', '0') !== '1') {
+            return;
+        }
+
         // Puerta trasera para administradores locales de WP: wp-login.php?native=1
         if ( isset($_GET['native']) && $_GET['native'] == '1' ) {
             return;
@@ -231,6 +245,11 @@ class MapasCulturais_SSO {
      * Paso 1: Usuario intenta entrar a wp-login.php, lo mandamos a Mapas Culturais
      */
     public function redirect_to_mapas_login() {
+        // Verificar si el SSO está habilitado para este sitio
+        if (get_option('mc_sso_enabled', '0') !== '1') {
+            return;
+        }
+
         // Protegemos para no crear bucles si ya viene de retorno
         if (isset($_GET['mc_token']) || isset($_GET['sso_error'])) {
             return;
